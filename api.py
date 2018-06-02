@@ -1,4 +1,5 @@
 import os
+import dateutil.parser
 from flask import Flask
 from flask import request
 from flask import jsonify
@@ -14,8 +15,9 @@ app = FlaskAPI(__name__)
 CORS(app)
 
 MONGO_URL = os.environ.get('MONGO_URL')
+
 if not MONGO_URL:
-    MONGO_URL = 'mongodb://127.0.0.1:27017'
+    MONGO_URL = 'mongodb://admin:pass123@ds141320.mlab.com:41320/live-feed-db'
 
 app.config['MONGO_URI'] = MONGO_URL
 app.config['JWT_SECRET_KEY'] = 'super-secret'
@@ -27,10 +29,6 @@ YOUTUBE_API_VERSION = 'v3'
 
 # Setup the Flask-JWT-Extended extension
 jwt = JWTManager(app)
-
-@app.route('/')
-def redirect():
-    return 'Hello World'
 
 @app.route('/v1/api/getJWTToken', methods=['GET'])
 def verify_token():
@@ -95,7 +93,70 @@ def youtube_search():
         'videos': videos
     }
 
+    # return videos
+    # return search_response.get('items', [])[0]
+    # return search_response
     return response_data
+
+@app.route('/v1/api/getStreamMessages', methods=['GET'])
+def stream_messages():
+    youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
+        developerKey=DEVELOPER_KEY)
+    
+    videoID = request.args.get('videoID')
+    pageToken = request.args.get('pageToken')
+
+    # Call the videos.list method to retrieve the liveChatID of the specified video.
+    video_response = youtube.videos().list(
+        part='id,snippet,liveStreamingDetails',
+        id=videoID,
+    ).execute()
+
+    video = []
+
+    for video_result in video_response.get('items', []):
+        video.append({
+            'title': video_result['snippet']['title'],
+            'liveStreamID': video_result['liveStreamingDetails']
+        })
+
+    # Check if live chat ID exists
+    if 'activeLiveChatId' not in video[0]['liveStreamID']:
+        return []
+    else:
+        messages_response = youtube.liveChatMessages().list(
+            liveChatId=video[0]['liveStreamID']['activeLiveChatId'],
+            part='id,snippet,authorDetails',
+            maxResults=200,
+            pageToken=pageToken
+        ).execute()
+
+    for message_item in messages_response.get('items', []):
+    #     # Save messages into database
+    #     mongo.db.messages.insert({
+    #         'username' : message_item['authorDetails']['displayName'],
+    #         'message' : message_item['snippet']['textMessageDetails']['messageText'],
+    #         'published' : message_item['snippet']['publishedAt']
+    #     })
+        date = dateutil.parser.parse(message_item['snippet']['publishedAt'])
+        message_item['snippet']['publishedAt'] = date.ctime()
+
+    return messages_response
+
+@app.route('/v1/api/getMessages', methods=['GET'])
+def get_messages():
+    searchTerm = request.args.get('searchValue')
+    messages = []
+    userMessages = mongo.db.messages.find({ 'username' : searchTerm }).sort('published', 1)
+
+    for message in userMessages:
+        messages.append({
+            'username': message['username'],
+            'message': message['message'],
+            'published': message['published']
+        })
+
+    return messages
 
 @app.after_request
 
