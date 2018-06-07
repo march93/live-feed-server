@@ -42,6 +42,7 @@ def verify_token():
     return jsonify(access_token=access_token), 200
 
 @app.route('/v1/api/getStreamList', methods=['GET'])
+@jwt_required
 def youtube_search():
     youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
         developerKey=DEVELOPER_KEY)
@@ -93,12 +94,10 @@ def youtube_search():
         'videos': videos
     }
 
-    # return videos
-    # return search_response.get('items', [])[0]
-    # return search_response
     return response_data
 
 @app.route('/v1/api/getStreamMessages', methods=['GET'])
+@jwt_required
 def stream_messages():
     youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
         developerKey=DEVELOPER_KEY)
@@ -132,28 +131,39 @@ def stream_messages():
         ).execute()
 
     for message_item in messages_response.get('items', []):
-    #     # Save messages into database
-    #     mongo.db.messages.insert({
-    #         'username' : message_item['authorDetails']['displayName'],
-    #         'message' : message_item['snippet']['textMessageDetails']['messageText'],
-    #         'published' : message_item['snippet']['publishedAt']
-    #     })
-        date = dateutil.parser.parse(message_item['snippet']['publishedAt'])
-        message_item['snippet']['publishedAt'] = date.ctime()
+        existingMessage = mongo.db.messages.find({ 'id': message_item['id'] })
+
+        # Skip existing messages to avoid saving duplicates
+        if (existingMessage.count() == 0):
+            # Save messages into database
+            mongo.db.messages.insert({
+                'id' : message_item['id'],
+                'username' : message_item['authorDetails']['displayName'],
+                'message' : message_item['snippet']['textMessageDetails']['messageText'],
+                'published' : message_item['snippet']['publishedAt'],
+            })
+            date = dateutil.parser.parse(message_item['snippet']['publishedAt'])
+            message_item['snippet']['publishedAt'] = date.ctime()
 
     return messages_response
 
 @app.route('/v1/api/getMessages', methods=['GET'])
+@jwt_required
 def get_messages():
     searchTerm = request.args.get('searchValue')
     messages = []
+
+    # Sort results by date/time published in ascending order
     userMessages = mongo.db.messages.find({ 'username' : searchTerm }).sort('published', 1)
 
     for message in userMessages:
+        # Format time
+        date = dateutil.parser.parse(message['published'])
+
         messages.append({
             'username': message['username'],
             'message': message['message'],
-            'published': message['published']
+            'published': date.ctime()
         })
 
     return messages
@@ -165,14 +175,6 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE')
     return response
-
-# Protect a view with jwt_required, which requires a valid access token in the request to access.
-@app.route('/protected', methods=['GET'])
-@jwt_required
-def protected():
-    # Access the identity of the current user with get_jwt_identity
-    current_user = get_jwt_identity()
-    return jsonify(logged_in_as=current_user), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
