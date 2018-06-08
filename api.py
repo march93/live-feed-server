@@ -142,8 +142,9 @@ def stream_messages():
                 'message' : message_item['snippet']['textMessageDetails']['messageText'],
                 'published' : message_item['snippet']['publishedAt'],
             })
-            date = dateutil.parser.parse(message_item['snippet']['publishedAt'])
-            message_item['snippet']['publishedAt'] = date.ctime()
+
+        date = dateutil.parser.parse(message_item['snippet']['publishedAt'])
+        message_item['snippet']['publishedAt'] = date.ctime()
 
     return messages_response
 
